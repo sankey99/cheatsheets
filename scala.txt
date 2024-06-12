@@ -1,0 +1,360 @@
+SBT
+check sbt installation vewrsion -> sbt --script-verison
+check project sbt version -> sbt sbtVersion
+___________________________________________________________
+
+
+conditional expression/ ternary operator
+       if(x >1) x else -x
+
+nested function
+def topFunc(x:Int)={
+    def innerFunc(y:Int)={..}
+}
+
+tail recursive function: function whose last call is call to itself ->  is more efficient as it uses same memory stack for all calls.
+  def factorial(n: Int): Int = {
+    assert(n >= 0)
+
+    @tailrec def factorial(n: Int, result: Int): Int =
+      if (n == 0) result
+      else factorial(n - 1, result * n)
+
+    factorial(n, emptyProduct)
+  }
+
+higher order  function takes function as parameter
+  def sum(f: Int => Int, a:Int, b:Int): Int = { 
+    if (a>b) 0 else f(a) + sum(f, a+1, b)
+  }
+
+anonymous  function is usually used with higher order function, without any name
+  def sumInt(a:Int, b:Int) : Int = sum((x:Int)=>x, a, b)
+
+currying  function returns function
+  def sum(f: Int => Int)(a: Int, b: Int): Int =if (a > b) 0 else f(a) + sum(f)(a + 1, b)
+   e.g sum(x:Int => x)(1,10)
+
+
+fixed point function a number x is fixed point of function f if f(x)=x
+
+every class has scala.AnyRef as ultimate super class
+
+inherited members can be overridden in subclass using override modifier
+
+there can be parameterless methods 
+  def square = new Rational(numer*numer, denom*denom)
+
+trait(s) are abstract classes that are meant to be added to some other class. 
+
+object is defined similar to class except it can not be initialized using new operator
+
+case classes and objects are defined as regular object and class with case keyword
+
+case classes implicitly define constructor with same name and param as class/object
+
+case classes provide implicit implementation of methods toString, equals and hashCode 
+
+case classes come with implicit nullary access methods for constructor parameters
+
+allows construction of patterns which refer to case class constructor (see below)
+
+pattern matching is generalization of java's switch and use match method instead, defined in root class Any
+e.g. 
+  def eval(e: Expr): Int = e match {
+              case Number(n) => n
+              case Sum(l, r) => eval(l) + eval(r)
+
+    } 
+pattern matching in method
+
+abstract class Expr {                
+        def eval: Int = this match {
+                        case Number(n) => n                         
+                        case Sum(e1, e2) => e1.eval + e2.eval 
+                   }
+}
+
+pattern matching in anonymous method
+
+(x=>x  {caseP1 =>E1 ...casePn =>En })
+
+
+in general patterns are build from 
+class constructors (Number. Sum above)
+variables (l,r) which binds the variable name to that value
+wildcard '_' which matches any value but doesnt bind a name to that value
+constant pattern matches to value which is equal (in terms of ==)
+
+Generics
+type parameter : class Stack[A] -> type parameter is defined in []
+
+bound type parameter: class Stack[A -> type parameter A must be subtype of Oderred[A]
+
+view bound type parameter: Stack[A <% Ordered[A]] -> weaker than plain bound (above), indicates A must be convertible to Ordered[A] using implicit conversion
+
+co-variant type Array[+A] -> indicates, if S < T then Array[S] is assignable to Array[T]
+co-variant types can only appear at co-variant positons which are
+types of values in a class
+result types of methods in a class
+type arguments to other co-variant types in a class
+not allowed co-variant positon
+type arguments of formal method parameters
+Upper bounds B:>A --> B is superclass of A
+consider 
+class Strack[+A]{
+     def push(X: A) { --> illegal, non-co variant position
+     }
+}
+
+ solution
+
+class Strack[+A]{
+     def push[B :> A](X: B) { --> allowed since co-variant type A, is in allowed position
+     }
+}
+
+contra-variant :  Array[-A] --> if S is subtype of T then classA[T] is subtype of classB[S]
+least type
+Nothing  -> is subclass of every class 
+since scala doesnt allow parameterize object with types, so for co-variant types obect can be defined as follows
+
+object EmptyStack extends Stack[Nothing] { ... }
+
+null -> is subclass of AnyRef and all subclasses of it, so its compatible to every reference type but not with value types like Int
+Tuple -> Tuple is a generic case  class used to return more than one value, is defined as below
+
+case class Tuple2[A, B](_1: A, _2: B)
+
+and usually accessed as below using special syntax
+
+divmod(x, y) match {     case (n, d) => println("quotient: " + n + ", rest: " + d)
+} 
+
+
+
+Tuplen also defined for . various no. of arguments like (x1, x2, .. xn)
+
+Function - trait is defined as below
+
+trait Function1[-A, +B] {
+       def apply(x: A): B 
+} 
+
+used as below
+valplus1:(Int=>Int) = (x:Int)=>x+1 
+functions are contra-variant in argument while co-variant in result
+there are Functionn for all other airieties
+
+Partial Funcation: <- is instance of PartialFunciton and may through exceptin it isDefinedAt returns false
+
+val partialFun= PartialFunction[Int,Int]{
+  case 1=> 42
+  case _ => 999
+}
+
+List
+scala Lists are more like java Array except they are immutable and recursive
+lists are built from Nil and :: (cons) 
+Nil represent empty list
+:: represent list extension, i.e. x::xs is a list with x as first element and xs the rest
+val l = List(1,2,3) is same as 1::(2:: (3 :: Nil)) is same as 1::2::3 
+all operators ending with : (hence :: as well) are right associative
+basic operations on list
+head - returns first element
+tail - return all but first element
+isEmpty - returns true if list is empty
+length - returns length of list
+last - retuns last element in the list
+take(n) - returns list containing first n elements
+drop(n) - returns list after dropping first n elements
+split(n) - returns tuple of lists of first n and rest of elements
+apply(n) - returns nth element,  can be used as list.apply(n) or list(3)
+zip(that: List[B]) - returns list of tuples consisting of elements of both lists
+:: - (pronounces cons) - used to create list like x::xs 
+::: - (conctenation operator) . xs:::ys - retuns list having all elements from xs followed by all elements from ys
+reverse(xs: List[A]): List - returns list with elements order reversed
+map(f ) :List - returns a list with  function f applied to each element of the lis
+foreach(f: Unit) : Unit -  applies f to each element but doesn't construct a list to return
+filter(f:Boolean):List - returns a list with elements for which f(x) is true
+ forAll(f:Boolean): Boolean - returns true if all elements return true for f
+exists(f:Boolean):Boolean - returns true if any element return true for f
+reduceLeft(op:(A,A)): A - applies an operator between each element
+e.g. sum(xs:List[A]) = (0::xs) reduceLeft{(x,y)=>x+y}
+foldLeft(z:A)(op(A,A):A):A - similar to reduceLeft, except it takes an accumulator z
+also represented by symbolic link /:
+e.g. sum(xs:List[A]) = (xs foldLeft 0) {(x,y) => x+y}
+reduceRight - same as reduceLeft except produces right leaning tree
+foldRight - same as foldLeft except produces right leaning tree
+also represented by symbolic link \:
+flatMap[B](f: A=> List[B]): List[B] - returns list with each element applied with function f which returns list i.e. returns list of lists
+List.range(x,y) - defined on object List returns list with elements between x and y
+
+For Comprehension
+for (p if p.age > 20) yield p.name - its like for loop in java except it generates list of result
+
+for ( s ) yield e - generic notation, where s is a sequence of generators, definition and filter
+The sequence s may also be enclosed in braces instead of parentheses, in which case the semicolons between generators, definitions and filters can be omitted
+e.g 
+for { i
+if isPrime(i+j) } yield {i, j}
+for ( s ) e - this is like for loop in java, notice yield  is missing, it also doesn't return list
+enabling for comprehension in custom objects
+custome class e.g C[A] needs to to implement map, flatMap and filter like
+def map[B](f: A => B): C[B]def flatMap[B](f: A => C[B]): C[B] 
+def filter(p: A => Boolean): C[A] 
+
+Stream/ LazyList
+Stream(s) are similar to List except Stream function work in a way where tail never evaluated unless invoked
+for that reason :: and ::: methods are not supported as they are right associative and require tail to be evaluated before this methods could be applied, instead use .cons and .append  methods with similar argument and similar results 
+
+Iterator
+Iterator is similar to List having similar methods, few distinct methods are below
+next: A
+hasNext: Bolean
+from(x: Int) -> returns infinite Iterator starting from x
+fromArray(xs:Array[A]) -> returns Iterator constructed from array
+
+lazy - modifier makes the value loaded on first use, all restriction of val applies except recursive local values are allowed
+
+Implicit Parameters
+if implicit prameter present, it makes is optional and can be ommitted from the call.
+e.g 
+def sum[A](xs: List[A])(implicit m: Monoid[A]): A =.. here m is optional
+there may only be 1 implicit parameter per method/constructor and must occur last 
+
+Concurrency and Synchronization
+thread communication
+wait
+wait(Long)
+notify
+notifyAll
+synchronize
+
+creating a new thread (scala.concurrent.op)
+SyncVar 
+offers get and put operations to read and set the variable. get operations block until the variable has been defined. An unset operation resets the variable to undefined state 
+spawn-> creates and starts a new thread
+usage 
+spawn { while (true) { val s = produceString ; buf.put(s) }
+  future -> executes in parallel with some other client thread and returned value used by client thread at some future time
+usage 
+val x = future(someLengthyComputation) 
+
+parallel computations
+par which takes a pair of computations as parameters and which returns the results of the computations in another pair 
+usage : var result: (A,B)= par(xp,yp)
+replicate which performs a number of replicates of a computation in parallel. Each replication instance is passed an inte- ger number which identifies it. 
+usage: 
+def parMap[A,B](f: A => B, xs: Array[A]): Array[B] = { val results = new Array[B](xs.length)
+replicate(0, xs.length) { i => results(i) = f(xs(i)) } results
+} 
+
+Lock: A common mechanism for process synchronization is a lock (or: semaphore). A lock offers two atomic actions: acquire and release 
+
+Channel 
+uses a linked list to store data that has been sent but not read yet. At the opposite end, threads that wish to read from an empty channel, register their presence by incrementing the nreaders field and waiting to be notified
+SyncChannel sender of a message blocks until that message has been received 
+
+Future: runs on separate thread and requires execution context to run
+import scala.concurrent.ExecutionsContext.Implicits.global
+val f= Futerue{
+  ???
+}
+
+handle future return
+f.onComplete{
+  case Success(v)=>??
+  case Failiure(e)=> ???
+}
+Await.ready(f, 1 second) <- waits for future to complete but doesn't retrieve its value
+val r=Await.result(f, 1 second) <- return  value inside future after it completes
+
+error recovery:
+
+f.recover{ <- wraps value in a future
+  ??? returns value
+}
+
+f.recoverWith{ <- 
+  ?? <- returns Future(value)
+}
+recover wraps plain result in Future for you (analogue of map), while recoverWith expects Future as the result (analogue of flatMap).
+f.fallbackTo{
+  anotherFuture <- returns another future, if that fails then returns exception of first one
+}
+
+Promise: promise can be thought of as a writable, single-assignment container, which completes a future.
+val p = Promise[T]()
+val f = p.future
+
+complete a promise 
+p.success("result")
+
+f.onComplete{
+  //use "result"
+}
+
+
+Type Classes:
+
+1. type class
+
+trait MyTypeClass[T]{
+def action(value:T) : <ReturnType>
+}
+
+2. type class instances
+
+implicit object MyTypeClassInstance extends MyTypeClass[MyType] {
+def action(value:T): <ReturnType> = ???
+}
+
+3. Type enrichment ->  implicit class using impicit type class instances
+
+implicit class MyType(value: T){
+def doAction()(implicit typeInstance: MyTypeClass[T]) = typeInstance.action(value)
+}
+
+Self Type:
+trait InstrumentList
+trait Singer{ self: InstrumentList => //whoever implements Singer must implement InstrumentList as well
+...
+}
+e.g.
+class Vocal extends Singer with InstrumentList { //Legal
+}
+
+Cake Pattern: self type is used to implement cake pattern, it defines layers of dependencies (hence name cake), comparable to DI in java
+e.g: 
+trait A
+tratit B{ self: A => }. -> B. requires A
+trait C { self : B =>
+self: B with A => //scala 3
+} -> C requires B (and hence A )
+
+Cake v/s DI : DI is done at runtime, while cake pattern enforces dependency check at compile time
+
+Diamond Problem: last inheritance wins
+trait Animal{def name=???}
+trait Tiger extends Animal{ override def name="tiger"}
+trait Lion extends Animal{ override def name="lion"}
+class Mutant extends Tiger with Lion // will return lion
+
+Type Linerization
+
+trait Cold
+trait Blue extends Cold
+trait Green extends Cold
+class Red 
+
+class White extends Red with Green with Blue
+//compile time re-written as
+class AnyRef with <body of Red> with <Green > with <Blue> with <White>
+
+Higher kinded type (HKT) F[_] <- List/Option/Future/Try -> refer cats Semigroup, Product etc type classes
+
+F-Bounded polymorphysm (recursive polymorphism)
+
+trait Animal[A<: Animal[A]]
+class Dog extends Animal[Dog]

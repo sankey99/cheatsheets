@@ -1,0 +1,36 @@
+Docker:
+
+docker --version
+
+##deploy from docker hub
+docker run -p 5000:5000 [-m 512m] [--cpu-quota 50000] in28min/hello-world-nodejs:0.0.1.RELEASE
+
+# [-m 512m]  - max memeory 522 mb  
+# [--cpu-quota 50000] max cpu allocated 50% 
+
+## deploy with detached mode
+docker run -d -p 5000:5000 in28min/hello-world-nodejs:0.0.1.RELEASE
+
+## view logs
+docker logs <part of container id>
+
+## list container(s)
+docker container ls
+
+## list all even exited ones
+docker container ls -a
+
+# list images on local registry
+docker images
+docker search mysql #search an image in local registry
+
+docker image history <image id> # show layers
+docker image inspect <image id> # image details
+docker image remove <image id> # remove form local registry - error if there is container referencing it
+
+docekr container ls/prune
+docker container run/pause/unpause/stop/kill/inspect <continer id>
+
+docker system df/events/info/prune 
+docker stats # cpu/memory etc
+docker top <container id>

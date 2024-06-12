@@ -1,0 +1,191 @@
+
+Spark SQL::::::
+
+
+
+
+
+Spark Optimizaton:::::: 
+
+Memory: 
+Driver:
+	spark.driver.memory = 1gb
+	spark.driver.memoryOverhead: 384 or 0.01%
+
+executer:
+	spark.executor.memory=8gb
+	spark.executor.memoryOverhead=0.1 (01*8 gb)
+	spark.executor.offHeap.size =0
+
+above memory are subset of cluster memory
+
+yarn.scheduler.maximum-allocation-mb=1792 (for AWS EMR c4 large of 3.75gb ram)
+
+executer:
+spark.executor.core=4
+spark.executer.memory =8gb = reserve memory (=300mb) + spark memory (60%)+ user memory(40%)
+ - can be changed by spark.memory.fraction =0.6 
+
+ spark memory = storage pool (50%)(cache DF) + executor memory (50%) (buffer memory) -> changed using spark.memory.storageFraction =0.5
+
+Adaptive Query Execution (AQE) :::::::
+ =>shuffle partitions created for wider join (group by)
+ - spark.sql.shuffle.partition=200(default), adjust to expected data partitions, otherwise as many tasks are created
+ => Adaptive Query Execution (since spark 3) <- dynamically calculates shuffle partition, as calculating required partition is impossible to know before hand
+ AQE configuration
+ 	=> optimize shuffle partition
+ -spark.sql.adaptive.enabled = true
+ -spark.sql.adaptive.coalescePartitions.initialParitionNum
+ -spark.sql.adaptive.coalescePartitions.minParitionNum
+ -spark.sql.adaptive.advisoryPartitionSizeInBytes=64mb
+ -spark.sql.adaptive.coalescePartitions.enabled=true (if false smaller paritions are not coalesed/combined)
+
+   => optimize join
+ =>AQE also dynamically optimizes joins ( sort merge join to broadcast hash join if one of dataset is samll enough to fit in memeory)
+ => AQE also optimises shuffle to reduce network traffic
+ -spark.sql.adaptive.localShuffleReader.enabled=true
+
+ 	=> optimize skewed join (one partition is much bigger than other)
+ -spark.sql.adaptive.skewJoin.enabled=true -> will split unporportional large partition and duplicate mathing join partition
+ -spark.sql.adaptive.skewJoin.skewedPartitionFactor=5
+ -spark.sql.adaptive.skewJoin.skewedPartitionThresoldInBytes=256MB
+
+ Dynamic Partition Pruning(DPP since spark 3) ::::
+ -spark.sql.optimizer.dynamicPartitionPruning.enabled=true(default)
+ 	=> 	1. Predicate Pushdown -> push down filter(where) and apply as early as possibel (during  scan/select), works only if data is partitioned on filter column
+ 		2. Parition Pruning -> read only the filtered partition  
+ 	=> DPP (when filter is on dimension rather than partitioned fact filter column)
+ 		- enable dynamic partition pruning feature - enabled by default
+ 		- apply broadcast on the dimension table(automatically broadcast'ed if size is < 10mb)
+ 		- must have partition on filter (joining fact column from dimension)
+
+ 		e.g orderDF
+ 				.join(f.broadcast(dateDF), "inner")
+ 				. groupBy(..)
+ 				.agg(f.sum(f.expr(...)))
+
+
+ Cache/Persist :::: 
+
+ Executer Process memory = 
+ 				Reserved Memory 
+ 				+ Executor Memory Pool
+ 				+ Storage Memory Pool
+ 				+ User Memory
+
+ - df.cache() / lazy transformation
+ -df.persist(SorageLevel(useDisk, useMemory, useOffHeap, deserialized, replication=1)) // similar with .persist allowing customization
+ -df.unpersist() -> uncache/unpersist
+
+Repartition/Coalesce:::::
+
+df.repartition(numParition, *col) -> use hash join, its a wide join and causes shuffle sort
+								 ->one of the argument is mandatory
+								 -> numPartition, if only provided, creates uniform numPartition
+								 -> if one or more col provide with/without numPartition, will create partition but may not be uniform
+df.repartitonByRange(numPartitions, *col)  -> same as above, use range of values to partition
+
+df.coalesce(n) -> use to reduce no# of parition, doesn't cause shuffle, doesn't increase no#  or partition, might cause skewed partition
+
+DF Hints :::::
+1. Partitioning Hint
+	a: COALESCE
+	b: REPARTITION
+	c: REPARTITIONBYRANGE
+	d: REBALANCE (from spark 3.0) ->to repartition to best effort rebalance partion size
+
+2. Join Hints
+	a: BROADCAST alias BROADCASTJOIN and MAPJOIN
+	b: MERGE alias SHUFFLE_MERGE and MERGEJOIN
+	c: SHUFFLE_HASH
+	d: SHUFFLE_REPLICATE_NL
+
+	apply: SELECT /* +  hint[,...] */ 
+	e.g: SLECT /* +  REPARTITION(3) */ * FROM t
+	df.join(boradcast(df2), "id", "inner")  -> same as BROADCAST hint
+		.hint("COALESCE", 5)
+
+Broadcast ::::
+=> used mainly in low level RDD api
+
+	Requirement
+	1. crearte UDF -> its user defined function, takes one or more parameter and returns a value
+
+	myFunction(prodCode:String) : String = prodBrapdcastData(prodCode)//UDF needs product made available
+
+	val prodData= spark.csv("file path").rdd.collectAsMap()
+	val prodBrodcastData= spark.sparkContext.braodcast(prodData)
+
+	spark.udf.register("myUdf", myFunction, StringType()) //standard UDF
+
+	use -> df.withColumn("Prodcut", expr(myUdf(code))
+	PS: in spark df/sql braodcast join does same thing, so this can be avoided by right design
+
+Accumulator::::
+	=> used mainly in low level RDD api
+	-> global mutable variable/updated per row/maintained at driver
+
+	val acc=spark.sparkContext.accumulator(0) / can be long/float/custom accumulators
+	-> can be incremented from transformation -> not recommended, accuracy not guranteed
+	-> recommended to be incremented from inside Action -> spark gurantees accuracy -> incrementing once and survive task restart
+
+Speculative Execution::::
+-> if one of tasks is much slower (due to faulty worker node), enabling speculative execution which run dup of same task on different node
+-> useful only in cases where issue due to node
+-> might be counter productive if isseu due to data/memory,dup task thus created may worsen the issue
+
+-spark.speculative=false (default)
+	configuration:
+		spark.speculation.interval  =100ms // check in 100 ms loop
+		spark.speculation.multiplier  =1.5 //speculative if it takes 1.5 time of median task
+		spark.speculation.quantile  =0.75 //fraction of task must complete i.e. 75% tasks are completed
+		spark.speculation.minTaskRuntime  =100ms //min time of task
+		spark.speculation.task.duration.thresold  =None //hard limit of speculative task thresold
+
+Spark Scheduler:::::
+1. Static Allocation (default)
+	-> first come first reserve (driver to cluster manager)
+	-> release only after completion
+
+2. Dynamic Allocation <- recommended to be enabled for shared cluster
+	-spark.dynamicAllocation.enabled=true
+	-spark.dynamicAllocation.shuffleTracking.enabled=true
+	-spark.dynamicAllocation.executorIdleTimeout=60s //resource released after idle timeout
+	-spark.dynamicAllocation.shedulerBacklogTimeout=1s //pending task for more than backlog time, will request new resource to cluster manager
+
+Run jobs in parallel within spark job:::
+	-> by default jobs are run sequentially by spark
+	-> it can be run in parallel by starting jobs in separate threads
+	e.g Future{
+		val df = ...
+		df.show
+	}
+		-> by default FIFO
+		-> can be configured to use FAIR 
+		-spark.scheduler.mode=FAIR -> round robin slot allocation
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 

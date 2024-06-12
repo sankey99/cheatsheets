@@ -1,0 +1,255 @@
+azure
+
+sql server pwd: B!tByte99
+
+SQL Transformation usig CETAS -> Create External Table As Select 
+
+- select from data lake Gen2:::
+
+ SELECT
+  TOP 100 *
+ FROM
+     OPENROWSET(
+         BULK 'https://datalakexxxxxxx.dfs.core.windows.net/files/sales/csv/**',
+         FORMAT = 'CSV',
+         PARSER_VERSION='2.0',
+         HEADER_ROW = TRUE
+     ) AS [result]
+
+
+ -- Database for sales data
+ CREATE DATABASE Sales
+   COLLATE Latin1_General_100_BIN2_UTF8;
+ GO;
+    
+ Use Sales;
+ GO;
+    
+ -- External data is in the Files container in the data lake
+ CREATE EXTERNAL DATA SOURCE sales_data WITH (
+     LOCATION = 'https://datalakexxxxxxx.dfs.core.windows.net/files/'
+ );
+ GO;
+    
+ -- Format for table files
+ CREATE EXTERNAL FILE FORMAT ParquetFormat
+     WITH (
+             FORMAT_TYPE = PARQUET,
+             DATA_COMPRESSION = 'org.apache.hadoop.io.compress.SnappyCodec'
+         );
+ GO;
+
+
+  USE Sales;
+ GO;
+ CREATE PROCEDURE sp_GetYearlySales
+ AS
+ BEGIN
+     -- drop existing table
+     IF EXISTS (
+             SELECT * FROM sys.external_tables
+             WHERE name = 'YearlySalesTotals'
+         )
+         DROP EXTERNAL TABLE YearlySalesTotals
+     -- create external table
+     CREATE EXTERNAL TABLE YearlySalesTotals
+     WITH (
+             LOCATION = 'sales/yearlysales/',
+             DATA_SOURCE = sales_data,
+             FILE_FORMAT = ParquetFormat
+         )
+     AS
+     SELECT YEAR(OrderDate) AS CalendarYear,
+             SUM(Quantity) AS ItemsSold,
+             ROUND(SUM(UnitPrice) - SUM(TaxAmount), 2) AS NetRevenue
+     FROM
+         OPENROWSET(
+             BULK 'sales/csv/*.csv',
+             DATA_SOURCE = 'sales_data',
+             FORMAT = 'CSV',
+             PARSER_VERSION = '2.0',
+             HEADER_ROW = TRUE
+         ) AS orders
+     GROUP BY YEAR(OrderDate)
+ END
+
+
+ read form data lake of json::::
+
+ SELECT JSON_VALUE(Doc, '$.SalesOrderNumber') AS OrderNumber,
+       JSON_VALUE(Doc, '$.CustomerName') AS Customer,
+       Doc
+FROM
+    OPENROWSET(
+        BULK 'https://datalakexxxxxxx.dfs.core.windows.net/files/sales/json/',
+        FORMAT = 'CSV',
+        FIELDTERMINATOR ='0x0b',
+        FIELDQUOTE = '0x0b',
+        ROWTERMINATOR = '0x0b'
+    ) WITH (Doc NVARCHAR(MAX)) as rows
+
+:::Create staging tables
+
+CREATE TABLE dbo.StageProduct
+(
+    ProductID NVARCHAR(10) NOT NULL,
+    ProductName NVARCHAR(200) NOT NULL,
+    ProductCategory NVARCHAR(200) NOT NULL,
+    Color NVARCHAR(10),
+    Size NVARCHAR(10),
+    ListPrice DECIMAL NOT NULL,
+    Discontinued BIT NOT NULL
+)
+WITH
+(
+    DISTRIBUTION = ROUND_ROBIN,
+    CLUSTERED COLUMNSTORE INDEX
+);
+
+copy data
+COPY INTO dbo.StageProduct
+    (ProductID, ProductName, ...)
+FROM 'https://mydatalake.../data/products*.parquet'
+WITH
+(
+    FILE_TYPE = 'PARQUET',
+    MAXERRORS = 0,
+    IDENTITY_INSERT = 'OFF'
+);
+
+alternatively use external table:
+CREATE EXTERNAL TABLE dbo.ExternalStageProduct
+ (
+     ProductID NVARCHAR(10) NOT NULL,
+     ProductName NVARCHAR(10) NOT NULL,
+ ...
+ )
+WITH
+ (
+    DATE_SOURCE = StagedFiles,
+    LOCATION = 'folder_name/*.parquet',
+    FILE_FORMAT = ParquetFormat
+ );
+GO
+
+-- loading from staging tables
+
+1. insert and/or update
+-- New Customers
+INSERT INTO dbo.DimCustomer
+SELECT stg.*
+FROM dbo.StageCustomers AS stg
+WHERE NOT EXISTS
+    (SELECT * FROM dbo.DimCustomer AS dim
+    WHERE dim.CustomerAltKey = stg.CustNo)
+
+-- Type 1 updates (name)
+UPDATE dbo.DimCustomer
+SET CustomerName = stg.CustomerName
+FROM dbo.StageCustomers AS stg
+WHERE dbo.DimCustomer.CustomerAltKey = stg.CustomerNo;
+
+-- Type 2 updates (StreetAddress)
+INSERT INTO dbo.DimCustomer
+SELECT stg.*
+FROM dbo.StageCustomers AS stg
+JOIN dbo.DimCustomer AS dim
+ON stg.CustNo = dim.CustomerAltKey
+AND stg.StreetAddress <> dim.StreetAddress;
+
+2. merge
+MERGE dbo.DimProduct AS tgt
+    USING (SELECT * FROM dbo.StageProducts) AS src
+    ON src.ProductID = tgt.ProductBusinessKey
+WHEN MATCHED THEN
+    -- Type 1 updates
+    UPDATE SET
+        tgt.ProductName = src.ProductName,
+        tgt.ProductCategory = src.ProductCategory,
+        tgt.Color = src.Color,
+        tgt.Size = src.Size,
+        tgt.ListPrice = src.ListPrice,
+        tgt.Discontinued = src.Discontinued
+WHEN NOT MATCHED THEN
+    -- New products
+    INSERT VALUES
+        (src.ProductID,
+        src.ProductName,
+        src.ProductCategory,
+        src.Color,
+        src.Size,
+        src.ListPrice,
+        src.Discontinued);
+
+POST LOAD OPTIMIZATON
+1. ALTER INDEX ALL ON dbo.DimProduct REBUILD
+2. CREATE STATISTICS productcategory_stats
+ON dbo.DimProduct(ProductCategory);
+
+
+
+
+Perfomrance Tuning, troubleshooting using Dynamic Management View(DMV) holds only 1000 records, so might lose data soon, for older query troubleshoot use QueryStore
+
+-- Other Active Connections
+SELECT * FROM sys.dm_pdw_exec_sessions where status <> 'Closed' and session_id <> session_id();
+
+Step 1: 
+
+-- Monitor active queries
+SELECT *
+FROM sys.dm_pdw_exec_requests
+WHERE status not in ('Completed','Failed','Cancelled')
+  AND session_id <> session_id()
+ORDER BY submit_time DESC;
+
+-- Find top 10 queries longest running queries
+SELECT TOP 10 *
+FROM sys.dm_pdw_exec_requests
+ORDER BY total_elapsed_time DESC;
+
+-- Query with Label
+SELECT *
+FROM sys.tables
+OPTION (LABEL = 'My Query')
+;
+
+-- Find a query with the Label 'My Query'
+-- Use brackets when querying the label column, as it it a key word
+SELECT  *
+FROM    sys.dm_pdw_exec_requests
+WHERE   [label] = 'My Query';
+
+Step 2: 
+
+-- Find the distributed query plan steps for a specific query.
+-- Replace request_id with value from Step 1.
+
+SELECT * FROM sys.dm_pdw_request_steps
+WHERE request_id = 'QID####'
+ORDER BY step_index;
+
+Step 3: 
+-- Find the distribution run times for a SQL step.
+-- Replace request_id and step_index with values from Step 1 and 3.
+
+SELECT * FROM sys.dm_pdw_sql_requests
+WHERE request_id = 'QID####' AND step_index = 2;
+
+-- Find the SQL Server execution plan for a query running on a specific SQL pool or control node.
+-- Replace distribution_id and spid with values from previous query.
+
+DBCC PDW_SHOWEXECUTIONPLAN(1, 78);
+
+Step 4: 
+-- Find information about all the workers completing a Data Movement Step.
+-- Replace request_id and step_index with values from Step 1 and 3.
+
+SELECT * FROM sys.dm_pdw_dms_workers
+WHERE request_id = 'QID####' AND step_index = 2;
+
+-- Find the SQL Server estimated plan for a query running on a specific SQL pool Compute or control node.
+-- Replace distribution_id and spid with values from previous query.
+
+DBCC PDW_SHOWEXECUTIONPLAN(55, 238);
+

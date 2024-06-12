@@ -1,0 +1,67 @@
+1. Semigroup:::::::
+A semigroup for some given type A has a single operation (which we will call combine), which takes two values of type A, and returns a value of type A. This operation must be guaranteed to be associative
+
+import cats.implicits._
+
+Semigroup[Int].combine(1, 2) should be(
+val one: Option[Int] = Option(1)
+val two: Option[Int] = Option(2)
+val n: Option[Int] = None
+
+one |+| two should be(Option(3)
+
+2. Monoid::::::
+Monoid extends the Semigroup type class, adding an empty method to semigroup's combine. The empty method must return a value that when combined with any other instance of that type returns the other instance, i.e.
+
+(combine(x, empty) == combine(empty, x) == x)
+import cats._
+import cats.implicits._
+
+Monoid[String].empty should be("")
+Monoid[String].combineAll(List("a", "b", "c")) should be("abc"
+
+3. Functor::::::::
+A Functor is a ubiquitous type class involving types that have one "hole", i.e. types which have the shape F[*], such as Option, List and Future. (This is in contrast to a type like Int which has no hole, or Tuple2 which has two holes (Tuple2[*,*])).
+
+The Functor category involves a single operation, named map:
+
+def map[A, B](fa: F[A])(f: A => B): F[B]
+
+CREATING FUNCTOR INSTANCES
+We can trivially create a Functor instance for a type which has a well behaved map method:
+
+import cats._
+
+implicit val optionFunctor: Functor[Option] = new Functor[Option] {
+  def map[A, B](fa: Option[A])(f: A => B) = fa map f
+}
+implicit def function1Functor[In]: Functor[Function1[In, *]] =
+  new Functor[Function1[In, *]] {
+    def map[A, B](fa: In => A)(f: A => B): Function1[In, B] = fa andThen f
+  }
+
+map
+List is a functor which applies the function to each element of the list:
+
+DERIVED METHODS
+lift
+We can use Functor to "lift" a function from A => B to F[A] => F[B]:
+
+al lenOption: Option[String] => Option[Int] = Functor[Option].lift(_.length)
+lenOption(Some("Hello")) should be(Some(5))
+
+fproduct
+Functor provides an fproduct function which pairs a value with the result of applying a function to that value.
+
+al source = List("Cats", "is", "awesome")
+val product = Functor[List].fproduct(source)(_.length).toMap
+
+product.get("Cats").getOrElse(0) should be(4)
+
+compose
+Functors compose! Given any functor F[_] and any functor G[_] we can create a new functor F[G[_]] by composing them:
+
+val listOpt = Functor[List] compose Functor[Option]
+listOpt.map(List(Some(1), None, Some(3)))(_ + 1) should be(List(Some(2),None, Some(4)))
+
+

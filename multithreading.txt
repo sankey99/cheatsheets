@@ -1,0 +1,157 @@
+concurrency vs parallelist:
+	concurrency focuses on managing multiple tasks with one resource
+	while parallalism is about managing multiple tasks on multiple resources in parallel
+
+Multithreading
+
+threadsing issues:
+1. race condition: caused when multiple threads are accessing a shared resource, which is being modified by non-atomic operation by at least 1 thread
+2. data race: caused by reordering of instructions due compiler optimization, applies to unrelated instructions.
+	e.g x++;
+		y++;
+			compiler may reorder it as y++;
+										x++;
+3. Deadlock
+	conditions for deadlock
+		1. Mutual exclusion : only one thread can have exclusive access to the resource
+		2. Hod and wait: thread get exclusive access to 1st resource and waiting to access 2nd
+		3. Non-preemptive allocation: can only release resource once completed
+		4. Circular wait: another thread has access to 2nd resource and waiting on 1st
+
+		-> if all of above conditions are met, it causes deadlock
+
+		Solution: 1. avoid circuarl wait: acqire lock is same order, this will never cause deadlock
+		2. Deadloack detection watchdog - implemented by low level routine whcih checks status of a register which must be updated by every thread, if register is not updated by a thread for a while, watchdog know its a deadlock
+		3. thread interruption - NOT SUPPORTED BY SYNCHRONIZED
+		3. tryLock - check if lock is qcquired alreeady, before acquiring lock - NOT SUPPORTED BY SYNCHRONIZED
+
+Re-entrant lock:::::::
+
+	java.util.concurrent.ReentrantLock(boolean fairness)
+
+	disadvantage: must lock and unloock explicitly
+
+		lockokObj.lock();
+			try{
+			...
+			}
+			finally{
+				lockObj.unlock()
+			}
+		this pattern must be followed.
+	advantages:
+		1. may make fairness by passing true -> careful, impacts throughput
+		2. many additional methods to list threads currently holding lock etc.
+		3.tryLock - allows acquiring lock without blocking
+		4. lockInterruptibly - allows to be interrupted
+
+	tryLock: returns true if lock acquired else false, it never blocks and allows thread to process
+		if(lockokObj.tryLock()){
+			try{
+			...
+			}
+			finally{
+				lockObj.unlock()
+			}
+		}else{ //lock not available, do somethign else
+				...
+		}
+
+ReentrantReadWriteLock:::::: <- may be counterproductie in some cases, useful fro read heavy use cases
+		 Lock rwLock=ReentrantReadWriteLock();
+		 Lock readLock=rwLock.readLock(); // many thread can enter critical section guarded by read lock
+		 Lock writeLock=rwLock.writeLock(); // only 1 thread can access critical section guarded by write lock, and no readlock is held at the time
+
+Semaphore ::: set of permits to allow those many threads to access a shared resource -> Lock is specific case of Semaphore with 1 permit to give
+
+	Semaphone permit=new Semaphore(n, true)// sacond boolean is optional and is to enable fairness 
+
+	permit.acquire()//if exceeded, thread block until relseased
+	permit.release()//any thread even those not holding semaphore can release, this makes it good choice for producer/consumer, not good for lock
+
+Condition:::::: -> acquire the lock, check for a condition, if not satisfied call condition.await which releases the lock goes to wait until woken up by condition.signal/condition.signalAll
+
+	use :
+		Lock lock=java.util.conncurrent.locks.ReentrantLock();
+		Condition condition=lock.condition();
+
+		lock.lock();
+		try{
+			while(username==null){
+				condition.await()  // this releases lock and waits until another thread calls condition.signal()/signalAll()
+			}
+			doStuff
+
+		}finally{
+			lock.unlock()
+		}
+
+Object.wait/notify/notifyAll :::::
+	-> available to all objects and can be used for interthread communication
+	-> caviat:: MUST be invoked from synchronized block
+
+	use :	Object lock=new Object();
+
+			syncronized(lock){
+				lock.wait() // blocked until another thread calls lock.notify/notifyAll
+
+			}
+
+Thread communication/BackPressure:: can use any of below, call semaphore.acquire/condition.await/object.wait to push backpressure(block producer) then semaphore.release/condition.signal/signalAll/object.notify/notifyAll to release backpressure(unblock producer thread)
+	tools :
+		Semaphore
+		Condition
+		wait/notify
+
+Higher order classes for thread communicaton
+	1. CounDownLatch -> start with count and has await()/countDown() methods, releases locks when coundown reaches 0
+	2. .. CyclicBarrier/Phaser/Exchanger
+
+Lock free architecuture:::
+	Atomic operations
+		1. READ/ASSIGNMENTS on all pritives (except long and double) 
+		2. READ/ASSIGNMENT on all references
+		3. READ/ASSIGNMENT on all volative primitive and references
+		2. java.util.concurrent.atomic.* classes and operations
+
+		AtomicReference<T>=new AtomicReference(t);
+		t.compareAndSet(oldValue, newValue) -> return true if comparision was true and new value set
+
+Blocking IO -> any operation other than calculation and ram read/write is IO
+
+	ThreadPerTask -> create new thread per task
+					-> step up form single threaded blocking
+					-> will exhaust thread, fixed thread pool might work, but sill context switches
+					-> threadsing -> more cpu cycles are used in OS operations than calculations
+					implementation
+
+			ExecutorService executerService = Executors.newFixedThreadPool(1000);
+			executerService.submit(() -> blockingOperation());
+
+	NonBlockingIO
+		VirtualThread (from jdk21) -> lightweight jvm threads not attached to OS thread/ has no attached stack and resides in heap and can be gc collected.
+					-> get mapped to small no# of carrer thread(os attached)
+					-> not beneficial in cpu heavy task
+					-> useful for io/network ops requiring blocking io/wait
+
+				use::
+					ExecutorService executerService = Executors.newVirtualThreadPerTaskExecutor();  // from Jdk 21
+					executerService.submit(() -> blockingOperation());
+
+Future v/s CompletableFuture 
+	-> Future.get is blocking, doen's support chaining, no way to manually create/complete future
+
+	CompletableFuture<Void> f= CompletableFuture.supplyAsync(()-> ..).thenApply(s-> s + ...).thenAccept(s->  sysout(s))
+	CompletableFuture<Void> r=CompletableFuture.thenRun(()-> systout(..) ) //takes Runnable
+	r.get() witll trigger execution
+
+	.thenApply(s-> s+..) // works with result .. like map
+	.thenCompose(s-> CompletableFuture.supplyAsync(t-> t+s)) // takes CF and flattens
+
+	.thenCombine
+
+	join mulitple CF
+
+	Stream.of(f1,f2,f3)
+		.map(CompletableFuture::join)
+		.collect(Collectors.joining(" "))
